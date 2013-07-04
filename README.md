@@ -1,6 +1,5 @@
 Jenkins Mercurial Plugin
 =========================
 
-This plugin integrates the Mercurial version control system with Jenkins.
-
-See [Mercurial Plugin](https://wiki.jenkins-ci.org/display/JENKINS/Mercurial+Plugin) on the Jenkins Wiki for more information.
+This plugin is a fork that integrates the Mercurial version control system with Jenkins. See https://github.com/jenkinsci/mercurial-plugin
+We want to integrate the possibility to clone/ update from a specific tag on a specific branch.

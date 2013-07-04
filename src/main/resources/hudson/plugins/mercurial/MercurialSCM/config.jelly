@@ -18,6 +18,9 @@
   <f:entry field="branch" title="${%Branch}">
     <f:textbox/>
   </f:entry>
+  <f:entry field="tag" title="${%Tag}">
+      <f:textbox/>
+  </f:entry>
   <f:advanced>
     <f:entry field="modules" title="${%Modules}">
       <f:textbox/>

@@ -77,9 +77,13 @@ public class MercurialSCM extends SCM implements Serializable {
     private final String modules;
 
     /**
-     * In-repository branch to follow. Null indicates "default".
+     * In-repository branch to follow. Null indicates "default". if tag var not null use tag to update
      */
     private final String branch;
+    /**
+     * In-repository tag to update. Null indicates use branch var.
+     */
+    private final String tag;
 
     /** Slash-separated subdirectory of the workspace in which the repository will be kept; null for top level. */
     private final String subdir;
@@ -88,8 +92,14 @@ public class MercurialSCM extends SCM implements Serializable {
 
     private HgBrowser browser;
 
-    @DataBoundConstructor
+
     public MercurialSCM(String installation, String source, String branch, String modules, String subdir, HgBrowser browser, boolean clean) {
+        this(installation, source, branch, null, modules, subdir, browser, clean);
+    }
+
+
+    @DataBoundConstructor
+    public MercurialSCM(String installation, String source, String branch, String tag, String modules, String subdir, HgBrowser browser, boolean clean) {
         this.installation = installation;
         this.source = Util.fixEmptyAndTrim(source);
         this.modules = Util.fixNull(modules);
@@ -100,6 +110,8 @@ public class MercurialSCM extends SCM implements Serializable {
         if (branch != null && branch.equals("default")) {
             branch = null;
         }
+        tag = Util.fixEmpty(tag);
+        this.tag = tag;
         this.branch = branch;
         this.browser = browser;
     }
@@ -152,9 +164,16 @@ public class MercurialSCM extends SCM implements Serializable {
     }
 
     /**
+     * In-repository branch to follow. Never null.
+     */
+    public String getTag() {
+        return tag;
+    }
+
+    /**
      * Same as {@link #getBranch()} but with <em>default</em> values of parameters expanded.
      */
-    private String getBranchExpanded(AbstractProject<?,?> project) {
+    private TagBranch getBranchExpanded(AbstractProject<?,?> project) {
         EnvVars env = new EnvVars();
         ParametersDefinitionProperty params = project.getProperty(ParametersDefinitionProperty.class);
         if (params != null) {
@@ -170,8 +189,12 @@ public class MercurialSCM extends SCM implements Serializable {
         return getBranch(env);
     }
 
-    private String getBranch(EnvVars env) {
-        return branch == null ? "default" : env.expand(branch);
+    private TagBranch getBranch(EnvVars env) {
+        //return branch == null ? "default" : env.expand(branch);
+       TagBranch tagBranch = new TagBranch();
+       tagBranch.setBranch(branch == null ? "default" : env.expand(branch));
+       tagBranch.setTag(tag);
+       return tagBranch;
     }
 
     public String getSubdir() {
@@ -269,8 +292,8 @@ public class MercurialSCM extends SCM implements Serializable {
             // Get the list of changed files.
             Node node = project.getLastBuiltOn(); // JENKINS-5984: ugly but matches what AbstractProject.poll uses; though compare JENKINS-14247
             FilePath repository = workspace2Repo(workspace);
-
-            pull(launcher, repository, listener, output, node, getBranchExpanded(project));
+            String revToBuild = (getBranchExpanded(project).getTag()!=null?getBranchExpanded(project).getTag():getBranchExpanded(project).getBranch());
+            pull(launcher, repository, listener, output, node, revToBuild);
 
             return compare(launcher, listener, baseline, output, node, repository, project);
         } catch(IOException e) {
@@ -286,7 +309,7 @@ public class MercurialSCM extends SCM implements Serializable {
 
     private PollingResult compare(Launcher launcher, TaskListener listener, MercurialTagAction baseline, PrintStream output, Node node, FilePath repository, AbstractProject<?,?> project) throws IOException, InterruptedException {
         HgExe hg = new HgExe(this, launcher, node, listener, /*XXX*/new EnvVars());
-        String _branch = getBranchExpanded(project);
+        String _branch = (getBranchExpanded(project).getTag()!=null?getBranchExpanded(project).getTag():getBranchExpanded(project).getBranch());
         String remote = hg.tip(repository, _branch);
         String rev = hg.tipNumber(repository, _branch);
         if (remote == null) {
@@ -405,11 +428,12 @@ public class MercurialSCM extends SCM implements Serializable {
             throw new AbortException("Failed to determine whether workspace can be reused");
         }
 
-        String revToBuild = getRevToBuild(build, build.getEnvironment(listener));
+        TagBranch tagBranch = getRevToBuild(build, build.getEnvironment(listener));
+        String revToBuild  = (tagBranch.getTag()!=null?tagBranch.getTag():tagBranch.getBranch());
         if (canReuseExistingWorkspace) {
             update(build, launcher, repository, listener, revToBuild);
         } else {
-            clone(build, launcher, repository, listener, revToBuild);
+            clone(build, launcher, repository, listener, tagBranch);
         }
 
         try {
@@ -548,22 +572,22 @@ public class MercurialSCM extends SCM implements Serializable {
         }
     }
 
-    private String getRevToBuild(AbstractBuild<?, ?> build, EnvVars env) {
-        String revToBuild = getBranch(env);
-        if (build instanceof MatrixRun) {
-            MatrixRun matrixRun = (MatrixRun) build;
-            MercurialTagAction parentRevision = matrixRun.getParentBuild().getAction(MercurialTagAction.class);
-            if (parentRevision != null && parentRevision.getId() != null) {
-                revToBuild = parentRevision.getId();
-            }
-        }
+    private TagBranch getRevToBuild(AbstractBuild<?, ?> build, EnvVars env) {
+        TagBranch revToBuild = getBranch(env);
+//        if (build instanceof MatrixRun) {
+//            MatrixRun matrixRun = (MatrixRun) build;
+//            MercurialTagAction parentRevision = matrixRun.getParentBuild().getAction(MercurialTagAction.class);
+//            if (parentRevision != null && parentRevision.getId() != null) {
+//                revToBuild = parentRevision.getId();
+//            }
+//        }
         return revToBuild;
     }
 
     /**
      * Start from scratch and clone the whole repository.
      */
-    private void clone(AbstractBuild<?, ?> build, Launcher launcher, FilePath repository, BuildListener listener, String toRevision)
+    private void clone(AbstractBuild<?, ?> build, Launcher launcher, FilePath repository, BuildListener listener, TagBranch tagBranch)
             throws InterruptedException, IOException {
         try {
             repository.deleteRecursive();
@@ -585,13 +609,13 @@ public class MercurialSCM extends SCM implements Serializable {
                 args.add(cachedSource.getRepoLocation());
             } else {
                 args.add("clone");
-                args.add("--rev", toRevision);
+                args.add("--rev", tagBranch.getBranch());
                 args.add("--noupdate");
                 args.add(cachedSource.getRepoLocation());
             }
         } else {
             args.add("clone");
-            args.add("--rev", toRevision);
+            args.add("--rev", tagBranch.getBranch());
             args.add("--noupdate");
             args.add(source);
         }
@@ -630,9 +654,9 @@ public class MercurialSCM extends SCM implements Serializable {
 
         ArgumentListBuilder upArgs = new ArgumentListBuilder();
         upArgs.add("update");
-        upArgs.add("--rev", toRevision);
+            upArgs.add("--rev", tagBranch.getTag());
         if (hg.run(upArgs).pwd(repository).join() != 0) {
-            throw new AbortException("Failed to update " + source + " to rev " + toRevision);
+            throw new AbortException("Failed to update " + source + " to rev in branch" + tagBranch.getBranch() + "/ tag " + tagBranch.getTag());
         }
 
         String tip = hg.tip(repository, null);
