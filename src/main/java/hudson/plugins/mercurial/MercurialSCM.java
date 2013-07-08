@@ -654,7 +654,7 @@ public class MercurialSCM extends SCM implements Serializable {
 
         ArgumentListBuilder upArgs = new ArgumentListBuilder();
         upArgs.add("update");
-        upArgs.add("--rev", (tagBranch.getTag()==null?tagBranch.getBranch():tagBranch.getTag()));
+        upArgs.add("--rev", (tagBranch.getTag()==null)?tagBranch.getBranch():tagBranch.getTag());
         if (hg.run(upArgs).pwd(repository).join() != 0) {
             throw new AbortException("Failed to update " + source + " to rev in branch" + tagBranch.getBranch() + "/ tag " + tagBranch.getTag());
         }
